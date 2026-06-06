@@ -5,4 +5,4 @@ all'autore alterazioni che intaccano copyright/paternità o il core protetto.
 Dati minimi, dichiarato, NON bloccante, mai sorveglianza del sistema cliente.
 """
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"

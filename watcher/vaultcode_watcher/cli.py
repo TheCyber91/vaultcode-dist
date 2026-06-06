@@ -74,6 +74,10 @@ def main(argv: list[str] | None = None) -> int:
                         "verifica che Runtime.php & co. non siano alterati; target dell'auto-update")
     p.add_argument("--report-url", help="key-server a cui inviare il report / scaricare gli update")
     p.add_argument("--install-uuid")
+    p.add_argument("--interval-min", type=int, default=None,
+                   help="intervallo (minuti) con cui questo watcher è SCHEDULATO. Lo imposta "
+                        "l'installer: il server ne deriva la soglia di silenzio. Ometterlo nei "
+                        "run manuali (resta la soglia di default generosa).")
     p.add_argument("--install-secret",
                    help="segreto per-installazione (hex) per la firma. PREFERIRE la variabile "
                         "d'ambiente VAULTCODE_INSTALL_SECRET: passarlo in riga di comando lo espone in 'ps'.")
@@ -109,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     rep = report_mod.build_report(
         install_uuid=install_uuid, events=events,
         generated_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        interval_min=args.interval_min,
     )
 
     if args.out:

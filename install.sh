@@ -287,10 +287,13 @@ PUBARG=""
 [ -f "$WATCHERDIR/vaultcode_pub.pem" ] && PUBARG="--auto-update --ed25519-public-key $WATCHERDIR/vaultcode_pub.pem"
 # NB: il segreto NON è in riga di comando (sarebbe visibile in 'ps'): il watcher
 # lo legge da $VAULTCODE_INSTALL_SECRET (file env 600 / systemd EnvironmentFile).
+# --interval-min comunica al server la cadenza schedulata: la soglia di silenzio
+# viene auto-derivata (≈4×) → sempre coerente con il cron, niente falsi positivi.
 WCMD="python3 -m vaultcode_watcher.cli \
 --root $APP --manifest $LIBDIR/manifest.json \
 --client-lib-dir $LIBDIR/src --watcher-dir $WATCHERDIR \
---report-url $KEY_SERVER_URL --install-uuid $INSTALL_UUID $PUBARG"
+--report-url $KEY_SERVER_URL --install-uuid $INSTALL_UUID \
+--interval-min $INTERVAL_MIN $PUBARG"
 
 # segreto in file env 600 (MAI nel crontab/unit in chiaro)
 mkdir -p /etc/vaultcode
@@ -348,7 +351,7 @@ set +e
 ( cd "$WATCHERDIR" && VAULTCODE_INSTALL_SECRET="$INSTALL_SECRET" \
   python3 -m vaultcode_watcher.cli --root "$APP" --manifest "$LIBDIR/manifest.json" \
   --client-lib-dir "$LIBDIR/src" --watcher-dir "$WATCHERDIR" \
-  --report-url "$KEY_SERVER_URL" --install-uuid "$INSTALL_UUID" )
+  --report-url "$KEY_SERVER_URL" --install-uuid "$INSTALL_UUID" --interval-min "$INTERVAL_MIN" )
 ST=$?
 set -e
 [ "$ST" -eq 0 ] && log "self-test OK." || warn "self-test ha restituito codice $ST (controlla i log)."
@@ -384,7 +387,9 @@ cat <<EOF
 
  NELLO STUDIO (pagina progetto → specifiche):
    - ambiente di deploy = VPS / server (o Docker)
-   - soglia silenzio watcher = $((INTERVAL_MIN * 4)) min  (≈ 4× l'intervallo: distacco rilevato in pochi minuti)
+   - soglia silenzio watcher: lascia VUOTO → è AUTO-derivata dalla cadenza del cron
+     (${INTERVAL_MIN} min → soglia ~$((INTERVAL_MIN * 4)) min). Il distacco del watcher
+     viene rilevato in pochi minuti senza falsi positivi. Imposta un valore solo per forzare un override.
 
  Verifiche:
    - badge ⚠ si auto-inietta se l'integrità non torna
