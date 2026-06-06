@@ -24,7 +24,16 @@ import json
 import re
 from pathlib import Path
 
-_RIGHTS_RE = re.compile(r"VAULTCODE_RIGHTS_TAG'\s*,\s*'([0-9a-fA-F]{64})'")
+# Tag di paternità in entrambi i dialetti:
+#   PHP:    define('VAULTCODE_RIGHTS_TAG', '<hex>')
+#   Python: VAULTCODE_RIGHTS_TAG = "<hex>"
+_RIGHTS_RE = re.compile(r"""VAULTCODE_RIGHTS_TAG['"]?\s*[,=]\s*['"]([0-9a-fA-F]{64})['"]""")
+# Chiamata runtime nei due dialetti: Runtime::fragment(  /  _vc.fragment(
+_FRAG_CALL_PREFIX = r"(?:Runtime::|_vc\.)fragment"
+
+
+def _has_core_call(text: str) -> bool:
+    return "Runtime::fragment(" in text or "_vc.fragment(" in text
 
 
 def sha256_file(path: Path) -> str:
@@ -90,7 +99,7 @@ def verify(root: str | Path, manifest: dict) -> list[dict]:
             text = p.read_text(encoding="utf-8")
         except OSError:
             continue
-        if "Runtime::fragment(" not in text:
+        if not _has_core_call(text):
             continue  # file senza core protetto: non si pretende l'header
         m = _RIGHTS_RE.search(text)
         if m is None:
@@ -102,7 +111,7 @@ def verify(root: str | Path, manifest: dict) -> list[dict]:
     # (c) core: ogni frammento atteso deve avere la sua chiamata runtime nei sorgenti.
     # Il 4° argomento (loop → memo, es. `, true`) è opzionale: la regex lo tollera.
     for module, frag, ck in _expected_fragments(root, payload_files):
-        pat = re.compile(r"Runtime::fragment\(\s*'" + re.escape(module) + r"'\s*,\s*'"
+        pat = re.compile(_FRAG_CALL_PREFIX + r"\(\s*'" + re.escape(module) + r"'\s*,\s*'"
                          + re.escape(frag) + r"'\s*,\s*" + str(ck) + r"\b")
         if not pat.search(joined):
             events.append({"path_relativo": f"{module}/{frag}", "tipo_evento": "core_fragment_removed"})

@@ -44,6 +44,22 @@ sudo bash install.sh --uninstall --app /var/www/html       # rimuove schedulazio
 sudo bash install.sh --uninstall --purge --app /var/www/html  # rimuove anche lib/config/segreto
 ```
 
+## Script Python (.py)
+Per proteggere **script/logica Python** (es. prompt e logica di agenti AI) usa il
+runtime `client-lib-python` incluso in questo repo (l'installer `install.sh` è per
+app PHP). Integrazione:
+```bash
+pip install ./client-lib-python          # dipende da 'cryptography'
+```
+```python
+from vaultcode import Runtime, Config
+Runtime.init(Config.from_json_file('vaultcode.config.json'))
+# i file protetti contengono: exec(_vc.fragment('mod','frag',1), globals())
+```
+Marca **funzioni/classi/costanti di modulo** (non blocchi a metà funzione). Il
+pacchetto per-installazione (payloads/manifest/config) si scarica dallo studio,
+come per PHP. Dettagli: `client-lib-python/README.md`.
+
 ## Cloud Run
 Su Cloud Run **non** si usa l'installer/watcher: FS immutabile, niente cron.
 Includi la lib nell'immagine, aggiorna con un **redeploy**, e nello studio imposta
