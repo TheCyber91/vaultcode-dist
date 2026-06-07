@@ -4,6 +4,7 @@ usato dalla versione PHP (un'unica config vale per entrambi i linguaggi)."""
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 
 
@@ -61,4 +62,17 @@ class Config:
             data = json.load(fh)
         if not isinstance(data, dict):
             raise RuntimeError(f"config non valida: {path}")
-        return cls.from_dict(data)
+        c = cls.from_dict(data)
+        # I path RELATIVI vengono risolti rispetto alla CARTELLA DELLA CONFIG (non al
+        # CWD): così la config può uscire con path relativi (es. "payloads") e funziona
+        # ovunque la si scompatti — lanciata da qualsiasi working dir/cron, anche con
+        # la libreria vendorizzata accanto al bot. I path ASSOLUTI restano invariati.
+        c._anchor_relative_paths(os.path.dirname(os.path.abspath(path)))
+        return c
+
+    def _anchor_relative_paths(self, base_dir: str) -> None:
+        for attr in ("payload_dir", "cache_path", "status_cache_path",
+                     "escrow_path", "banner_log_file"):
+            v = getattr(self, attr)
+            if v and not os.path.isabs(v):
+                setattr(self, attr, os.path.normpath(os.path.join(base_dir, v)))

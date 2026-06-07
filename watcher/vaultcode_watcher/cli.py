@@ -66,7 +66,11 @@ def _run_update(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="vaultcode-watch")
-    p.add_argument("--root", help="directory dell'opera protetta (verifica)")
+    p.add_argument("--root", action="append", metavar="DIR",
+                   help="directory dell'opera protetta (verifica). Ripetibile: indica più "
+                        "ALBERI di ricerca quando i file protetti stanno in cartelle diverse "
+                        "(es. app PHP + bot Python). Ogni file del manifest è localizzato "
+                        "autonomamente sotto questi alberi, ovunque sia.")
     p.add_argument("--manifest", help="manifest.json di riferimento (verifica)")
     p.add_argument("--out", help="scrive il report JSON su questo file")
     p.add_argument("--client-lib-dir",

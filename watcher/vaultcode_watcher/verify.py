@@ -24,6 +24,8 @@ import json
 import re
 from pathlib import Path
 
+from .locate import FileLocator
+
 # Tag di paternità in entrambi i dialetti:
 #   PHP:    define('VAULTCODE_RIGHTS_TAG', '<hex>')
 #   Python: VAULTCODE_RIGHTS_TAG = "<hex>"
@@ -42,15 +44,26 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _read_source_text(path: Path) -> str:
+    """Legge un SORGENTE del cliente in modo tollerante. I marker che cerchiamo
+    (tag esadecimale di paternità, chiamate ``fragment``) sono ASCII: un sorgente
+    legacy non-UTF8 (es. PHP in cp1252/latin-1) NON deve far crashare il watcher
+    né generare falsi positivi → si decodifica con ``errors="replace"``."""
+    try:
+        return path.read_bytes().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 def load_manifest(path: str | Path) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def _expected_fragments(root: Path, payload_files: list[str]) -> list[tuple[str, str, int]]:
+def _expected_fragments(locate, payload_files: list[str]) -> list[tuple[str, str, int]]:
     out: list[tuple[str, str, int]] = []
     for rel in payload_files:
-        p = root / rel
-        if not p.is_file():
+        p = locate(rel)
+        if p is None or not p.is_file():
             continue
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
@@ -62,9 +75,14 @@ def _expected_fragments(root: Path, payload_files: list[str]) -> list[tuple[str,
     return out
 
 
-def verify(root: str | Path, manifest: dict) -> list[dict]:
-    """Confronta lo stato su disco col manifest. Ritorna la lista (minima) di eventi."""
-    root = Path(root)
+def verify(root, manifest: dict) -> list[dict]:
+    """Confronta lo stato su disco col manifest. Ritorna la lista (minima) di eventi.
+
+    ``root`` può essere una singola directory o una **lista di alberi di ricerca**:
+    ogni file del manifest è localizzato autonomamente (vedi ``locate.FileLocator``),
+    così il monitoraggio funziona con qualsiasi layout del cliente — anche con i
+    file distribuiti su cartelle diverse (es. app PHP + bot Python separati).
+    """
     files: dict[str, str] = manifest.get("files", {})
     tag: str = manifest.get("entanglement_tag", "")
     events: list[dict] = []
@@ -72,10 +90,13 @@ def verify(root: str | Path, manifest: dict) -> list[dict]:
     payload_files = [p for p in files if p.startswith("payloads/")]
     source_files = [p for p in files if not p.startswith("payloads/")]
 
+    roots = list(root) if isinstance(root, (list, tuple)) else [root]
+    locate = FileLocator(roots, list(files.keys())).locate
+
     # (a) integrità dei payload cifrati: devono essere byte-identici.
     for rel in payload_files:
-        p = root / rel
-        if not p.is_file():
+        p = locate(rel)
+        if p is None or not p.is_file():
             events.append({"path_relativo": rel, "tipo_evento": "payload_missing"})
             continue
         observed = sha256_file(p)
@@ -84,21 +105,19 @@ def verify(root: str | Path, manifest: dict) -> list[dict]:
                            "expected_hash": files[rel], "observed_hash": observed})
 
     # Testo concatenato dei sorgenti presenti (per ricerche di presenza).
-    present_sources = {rel: (root / rel) for rel in source_files if (root / rel).is_file()}
+    present_sources: dict[str, Path] = {}
+    for rel in source_files:
+        p = locate(rel)
+        if p is not None and p.is_file():
+            present_sources[rel] = p
     joined = ""
     for p in present_sources.values():
-        try:
-            joined += p.read_text(encoding="utf-8") + "\n"
-        except OSError:
-            pass
+        joined += _read_source_text(p) + "\n"
 
     # (b) attribuzione (102-quinquies): nei sorgenti che contengono il core deve
     #     esserci VAULTCODE_RIGHTS_TAG e deve combaciare col manifest.
     for rel, p in present_sources.items():
-        try:
-            text = p.read_text(encoding="utf-8")
-        except OSError:
-            continue
+        text = _read_source_text(p)
         if not _has_core_call(text):
             continue  # file senza core protetto: non si pretende l'header
         m = _RIGHTS_RE.search(text)
@@ -110,7 +129,7 @@ def verify(root: str | Path, manifest: dict) -> list[dict]:
 
     # (c) core: ogni frammento atteso deve avere la sua chiamata runtime nei sorgenti.
     # Il 4° argomento (loop → memo, es. `, true`) è opzionale: la regex lo tollera.
-    for module, frag, ck in _expected_fragments(root, payload_files):
+    for module, frag, ck in _expected_fragments(locate, payload_files):
         pat = re.compile(_FRAG_CALL_PREFIX + r"\(\s*'" + re.escape(module) + r"'\s*,\s*'"
                          + re.escape(frag) + r"'\s*,\s*" + str(ck) + r"\b")
         if not pat.search(joined):

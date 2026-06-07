@@ -228,6 +228,48 @@ PY
 fi
 
 # =============================================================================
+# 3-bis) Requisiti dei moduli NATIVI (Nuitka): il .so è legato a versione Python +
+# piattaforma. Verifica la compatibilità e, se manca, INSTALLA il Python richiesto.
+# =============================================================================
+if command -v python3 >/dev/null 2>&1; then
+  NMAN="$LIBDIR/manifest.json"
+  NEED_PY="$(python3 -c 'import json,sys;print((json.load(open(sys.argv[1])).get("native") or {}).get("python",""))' "$NMAN" 2>/dev/null || true)"
+  if [ -n "$NEED_PY" ]; then
+    NEED_PLAT="$(python3 -c 'import json,sys;print((json.load(open(sys.argv[1])).get("native") or {}).get("platform",""))' "$NMAN" 2>/dev/null || true)"
+    HAVE_PLAT="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+    log "moduli nativi nel pacchetto → richiesto Python ${NEED_PY} / ${NEED_PLAT:-?}"
+    if [ -n "$NEED_PLAT" ] && [ "$NEED_PLAT" != "$HAVE_PLAT" ]; then
+      err "moduli nativi per ${NEED_PLAT}, ma questo host è ${HAVE_PLAT}: serve un pacchetto ricompilato per questa piattaforma."
+    fi
+    if command -v "python${NEED_PY}" >/dev/null 2>&1; then
+      log "Python ${NEED_PY} già presente: $(command -v python${NEED_PY})"
+    else
+      warn "Python ${NEED_PY} assente → installo…"
+      if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y >/dev/null 2>&1 || true
+        if ! apt-get install -y "python${NEED_PY}" "python${NEED_PY}-venv" >/dev/null 2>&1; then
+          # Ubuntu datati: serve il PPA deadsnakes
+          apt-get install -y software-properties-common >/dev/null 2>&1 || true
+          add-apt-repository -y ppa:deadsnakes/ppa >/dev/null 2>&1 || true
+          apt-get update -y >/dev/null 2>&1 || true
+          apt-get install -y "python${NEED_PY}" "python${NEED_PY}-venv" >/dev/null 2>&1 \
+            || warn "non sono riuscito a installare Python ${NEED_PY}: installalo a mano (i moduli nativi lo richiedono)."
+        fi
+      else
+        warn "gestore pacchetti non apt: installa Python ${NEED_PY} a mano (i moduli nativi lo richiedono)."
+      fi
+      command -v "python${NEED_PY}" >/dev/null 2>&1 && log "Python ${NEED_PY} installato: $(command -v python${NEED_PY})"
+    fi
+    # verifica che il client + il .so si importino col Python richiesto
+    if command -v "python${NEED_PY}" >/dev/null 2>&1; then
+      "python${NEED_PY}" -c 'import cryptography' 2>/dev/null \
+        || "python${NEED_PY}" -m pip install --quiet cryptography 2>/dev/null || true
+      warn "Esegui i tuoi script/bot Python con 'python${NEED_PY}' (carica il modulo nativo + la libreria vaultcode)."
+    fi
+  fi
+fi
+
+# =============================================================================
 # 4) Estensione nativa (opzionale, match versione PHP)
 # =============================================================================
 if [ "$INSTALL_NATIVE" -eq 1 ] && command -v php >/dev/null 2>&1; then
