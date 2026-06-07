@@ -75,13 +75,17 @@ def _expected_fragments(locate, payload_files: list[str]) -> list[tuple[str, str
     return out
 
 
-def verify(root, manifest: dict) -> list[dict]:
+def verify(root, manifest: dict, *, anchor: str | None = None) -> list[dict]:
     """Confronta lo stato su disco col manifest. Ritorna la lista (minima) di eventi.
 
-    ``root`` può essere una singola directory o una **lista di alberi di ricerca**:
-    ogni file del manifest è localizzato autonomamente (vedi ``locate.FileLocator``),
-    così il monitoraggio funziona con qualsiasi layout del cliente — anche con i
-    file distribuiti su cartelle diverse (es. app PHP + bot Python separati).
+    ``root`` può essere None, una singola directory o una **lista di alberi di
+    ricerca**: ogni file del manifest è localizzato autonomamente (vedi
+    ``locate.FileLocator``), e se non si trova sotto le root date il watcher lo
+    **cerca da solo** (autodiscovery: alberi standard del server + antenati di
+    ``anchor``). Così il monitoraggio funziona con qualsiasi layout del cliente —
+    anche con i file distribuiti su cartelle diverse (app PHP + bot Python separati)
+    senza dover dichiarare i percorsi. ``anchor`` = path del manifest/config (ancora
+    per l'autodiscovery).
     """
     files: dict[str, str] = manifest.get("files", {})
     tag: str = manifest.get("entanglement_tag", "")
@@ -90,8 +94,11 @@ def verify(root, manifest: dict) -> list[dict]:
     payload_files = [p for p in files if p.startswith("payloads/")]
     source_files = [p for p in files if not p.startswith("payloads/")]
 
-    roots = list(root) if isinstance(root, (list, tuple)) else [root]
-    locate = FileLocator(roots, list(files.keys())).locate
+    if root is None:
+        roots: list = []
+    else:
+        roots = list(root) if isinstance(root, (list, tuple)) else [root]
+    locate = FileLocator(roots, list(files.keys()), anchor=anchor).locate
 
     # (a) integrità dei payload cifrati: devono essere byte-identici.
     for rel in payload_files:

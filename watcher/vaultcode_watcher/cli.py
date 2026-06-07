@@ -67,10 +67,10 @@ def _run_update(args) -> int:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="vaultcode-watch")
     p.add_argument("--root", action="append", metavar="DIR",
-                   help="directory dell'opera protetta (verifica). Ripetibile: indica più "
-                        "ALBERI di ricerca quando i file protetti stanno in cartelle diverse "
-                        "(es. app PHP + bot Python). Ogni file del manifest è localizzato "
-                        "autonomamente sotto questi alberi, ovunque sia.")
+                   help="directory dell'opera protetta (verifica). Ripetibile: più ALBERI "
+                        "di ricerca. OPZIONALE: se omesso, il watcher cerca DA SOLO gli "
+                        "alberi (autodiscovery: alberi standard del server + antenati del "
+                        "manifest). Indicarlo serve solo a restringere/velocizzare la ricerca.")
     p.add_argument("--manifest", help="manifest.json di riferimento (verifica)")
     p.add_argument("--out", help="scrive il report JSON su questo file")
     p.add_argument("--client-lib-dir",
@@ -106,12 +106,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.update:
         return _run_update(args)
 
-    if not args.root or not args.manifest:
-        p.error("--root e --manifest sono obbligatori (tranne con --update)")
+    if not args.manifest:
+        p.error("--manifest è obbligatorio (tranne con --update)")
 
     manifest = verify.load_manifest(args.manifest)
     install_uuid = args.install_uuid or manifest.get("install_uuid", "")
-    events = verify.verify(args.root, manifest)
+    # --root opzionale: se assente, autodiscovery ancorata al manifest.
+    events = verify.verify(args.root, manifest, anchor=args.manifest)
     if args.client_lib_dir:
         events += verify.verify_client_lib(args.client_lib_dir, manifest)
     rep = report_mod.build_report(
