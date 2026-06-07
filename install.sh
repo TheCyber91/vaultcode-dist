@@ -4,6 +4,7 @@
 # -----------------------------------------------------------------------------
 # Installa in un colpo solo:
 #   - libreria client PHP        (lib/src/*.php)         -> $APP/$LIBSUBDIR/src
+#   - bootstrap.php (auto-init)  (lib/bootstrap.php)     -> $APP/$LIBSUBDIR
 #   - payloads + manifest + config (dal pacchetto studio) -> $APP/$LIBSUBDIR
 #   - estensione nativa .so      (match versione PHP, opzionale)
 #   - watcher Python             (vaultcode_watcher)     -> $WATCHERDIR
@@ -15,8 +16,10 @@
 # config, CON i segreti) lo fornisci tu (download dallo studio).
 #
 # NON modifica la logica dell'app del cliente. Nessun meccanismo distruttivo
-# (INVARIANTE 1). La riga di bootstrap Runtime::init NON viene cablata nell'app:
-# l'installer te la stampa (o la inserisce solo se passi --insert-bootstrap).
+# (INVARIANTE 1). BOOTSTRAP AUTOMATICO: i file protetti includono da soli
+# $LIBSUBDIR/bootstrap.php (lo cercano risalendo da __DIR__) → il runtime si
+# inizializza SENZA toccare core.php/l'entrypoint (sopravvive agli update).
+# (--insert-bootstrap <file> resta come opzione per agganciarlo a un entrypoint.)
 #
 # Uso tipico:
 #   curl -fsSL https://raw.githubusercontent.com/TheCyber91/vaultcode-dist/main/install.sh \
@@ -204,6 +207,9 @@ fi
 log "installo la libreria in $LIBDIR…"
 mkdir -p "$LIBDIR"
 rm -rf "$LIBDIR/src"; cp -r "$DIST/lib/src" "$LIBDIR/src"
+# bootstrap.php: i file protetti lo cercano risalendo da __DIR__ e lo includono da
+# soli → il runtime si inizializza SENZA toccare l'entrypoint (core.php & co.).
+if [ -f "$DIST/lib/bootstrap.php" ]; then cp "$DIST/lib/bootstrap.php" "$LIBDIR/bootstrap.php"; fi
 rm -rf "$LIBDIR/payloads"; cp -r "$PKGDIR/payloads" "$LIBDIR/payloads"
 cp "$PKGDIR/manifest.json" "$LIBDIR/manifest.json"
 cp "$PKGDIR/vaultcode.config.json" "$LIBDIR/vaultcode.config.json"
@@ -423,9 +429,12 @@ cat <<EOF
  Config:     $LIBDIR/vaultcode.config.json  (chmod 600)
  Watcher:    $WATCHERDIR  (ogni ${INTERVAL_MIN} min)
  Segreto:    $ENVF  (chmod 600)
+ Bootstrap:  $LIBDIR/bootstrap.php  (AUTO — incluso dai file protetti)
 
- DA FARE A MANO (1 riga, nel bootstrap dell'app — non la cabliamo per te):
-   $BOOTLINE
+ BOOTSTRAP AUTOMATICO: i file protetti includono da soli $LIBDIR/bootstrap.php
+ (lo cercano risalendo le cartelle). NON serve toccare core.php / l'entrypoint del
+ gestionale → la protezione sopravvive agli update. (Opzionale: --insert-bootstrap
+ <file> per agganciarlo anche a un entrypoint, ma di norma non serve.)
 
  NELLO STUDIO (pagina progetto → specifiche):
    - ambiente di deploy = VPS / server (o Docker)
