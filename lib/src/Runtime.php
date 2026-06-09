@@ -22,7 +22,7 @@ final class Runtime
 {
     /** Versione della libreria client (riportata al key-server via /status,
      *  usata dallo studio per "aggiornata?" e dall'auto-update). */
-    public const VERSION = '1.0.0';
+    public const VERSION = '1.0.1';
 
     private static ?Runtime $instance = null;
     /** Flag: buffer d'output per l'iniezione automatica del badge già armato. */
@@ -310,18 +310,25 @@ final class Runtime
         }
     }
 
-    /** Vero se la risposta è (o si assume) HTML: non sporcare JSON/AJAX/download. */
+    /** Vero SOLO se la risposta è ESPLICITAMENTE HTML. ``shutdownBadge()`` non può
+     *  ispezionare il body già emesso, quindi qui siamo CONSERVATIVI: senza un
+     *  Content-Type esplicito ritorniamo false. Motivo: gli endpoint AJAX (es. OSM)
+     *  fanno ``echo json_encode(...)`` SENZA settare il Content-Type → col vecchio
+     *  default ``true`` il badge veniva appeso al JSON, corrompendolo (JSON.parse KO,
+     *  contatori a 0, tabelle vuote). Le pagine HTML vengono coperte dalla via "pulita"
+     *  ``obHandler``/``injectBadge`` (che ispeziona il buffer e riconosce </body>/<html>),
+     *  non da questo fallback. */
     private static function responseIsHtml(): bool
     {
         if (!function_exists('headers_list')) {
-            return true;
+            return false;
         }
         foreach (headers_list() as $h) {
             if (stripos($h, 'content-type:') === 0) {
                 return stripos($h, 'text/html') !== false;
             }
         }
-        return true; // nessun Content-Type esplicito → default text/html
+        return false; // nessun Content-Type esplicito → NON iniettare (non sporcare JSON)
     }
 
     /**
