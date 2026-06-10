@@ -22,7 +22,7 @@ final class Runtime
 {
     /** Versione della libreria client (riportata al key-server via /status,
      *  usata dallo studio per "aggiornata?" e dall'auto-update). */
-    public const VERSION = '1.0.1';
+    public const VERSION = '1.0.2';
 
     private static ?Runtime $instance = null;
     /** Flag: buffer d'output per l'iniezione automatica del badge già armato. */
@@ -275,60 +275,31 @@ final class Runtime
             return;
         }
         self::$autoBadgeArmed = true;
-        // 1) iniezione "pulita" prima di </body> quando il framework lascia
-        //    flushare il buffer.
+        // Iniezione "pulita": obHandler ispeziona il CONTENUTO del buffer e
+        // inietta il badge prima di </body> SOLO se è una pagina HTML — mai in
+        // JSON/AJAX (anche quando PHP manda Content-Type: text/html di default).
         ob_start([self::class, 'obHandler']);
-        // 2) fallback ROBUSTO: a fine richiesta (sempre eseguito) emette il badge
-        //    se l'handler non ha potuto agire — es. framework che cattura l'output
-        //    con ob_get_clean() (AdminLTE/OpenSTAManager). Così il badge è emesso
-        //    dal runtime VaultCode, senza toccare i file dell'app ospite.
+        // Hook a fine richiesta registrato per simmetria/estendibilità, ma è un
+        // no-op: a shutdown non c'è più un buffer da ispezionare, quindi NON si
+        // inietta alla cieca (lo facevamo prima → JSON corrotto). Vedi shutdownBadge().
         register_shutdown_function([self::class, 'shutdownBadge']);
     }
 
     /**
-     * Fallback di fine richiesta. Se il nostro buffer è ancora attivo sarà
-     * l'handler a iniettare (non duplica); altrimenti emette il badge come box
-     * fisso. Solo risposte HTML, solo se compromesso. Mai solleva.
+     * Hook di fine richiesta. NON inietta nulla da solo: a shutdown l'output è
+     * già stato emesso e non c'è più un buffer da ispezionare, quindi non si può
+     * sapere se la risposta era HTML o JSON. Iniettare "alla cieca" qui (come
+     * faceva la vecchia versione fidandosi del Content-Text/html, che PHP mette
+     * di default anche sugli AJAX) corrompeva il JSON. L'unica via SICURA è
+     * ``obHandler``, che lavora sul CONTENUTO del buffer (vedi ``looksLikeHtml``).
+     * Lasciato registrato come no-op difensivo: se in futuro servisse un fallback,
+     * dovrà comunque basarsi sul contenuto, mai sul solo Content-Type.
      */
     public static function shutdownBadge(): void
     {
-        try {
-            // Il nostro buffer è ancora nello stack? → ci penserà obHandler.
-            foreach (ob_get_status(true) as $b) {
-                if (isset($b['name']) && strpos((string)$b['name'], 'obHandler') !== false) {
-                    return;
-                }
-            }
-            $badge = self::integrityBadge();
-            if ($badge === '' || !self::responseIsHtml()) {
-                return;
-            }
-            echo '<div style="position:fixed !important;right:16px !important;bottom:16px !important;'
-                . 'z-index:2147483647 !important">' . $badge . '</div>';
-        } catch (\Throwable $e) {
-            // mai rompere l'output del cliente (INVARIANTE 1)
-        }
-    }
-
-    /** Vero SOLO se la risposta è ESPLICITAMENTE HTML. ``shutdownBadge()`` non può
-     *  ispezionare il body già emesso, quindi qui siamo CONSERVATIVI: senza un
-     *  Content-Type esplicito ritorniamo false. Motivo: gli endpoint AJAX (es. OSM)
-     *  fanno ``echo json_encode(...)`` SENZA settare il Content-Type → col vecchio
-     *  default ``true`` il badge veniva appeso al JSON, corrompendolo (JSON.parse KO,
-     *  contatori a 0, tabelle vuote). Le pagine HTML vengono coperte dalla via "pulita"
-     *  ``obHandler``/``injectBadge`` (che ispeziona il buffer e riconosce </body>/<html>),
-     *  non da questo fallback. */
-    private static function responseIsHtml(): bool
-    {
-        if (!function_exists('headers_list')) {
-            return false;
-        }
-        foreach (headers_list() as $h) {
-            if (stripos($h, 'content-type:') === 0) {
-                return stripos($h, 'text/html') !== false;
-            }
-        }
-        return false; // nessun Content-Type esplicito → NON iniettare (non sporcare JSON)
+        // Intenzionalmente vuoto: l'iniezione del badge avviene solo via obHandler,
+        // che può ispezionare il body. Vedi looksLikeHtml(). (INVARIANTE 1: mai
+        // sporcare/rompere l'output del cliente.)
     }
 
     /**
@@ -370,15 +341,34 @@ final class Runtime
         }
     }
 
-    /** Euristica prudente: inietta solo in risposte HTML, mai in JSON/download. */
+    /**
+     * Euristica prudente: inietta SOLO in pagine HTML, mai in JSON/XML/download.
+     *
+     * Decide guardando il CONTENUTO del buffer (fonte autorevole), NON il
+     * Content-Type. Motivo: con ``default_mimetype=text/html`` (config standard
+     * Ubuntu/Debian + Apache/PHP-FPM) PHP manda comunque ``Content-Type: text/html``
+     * anche per gli endpoint AJAX che fanno ``echo json_encode(...)`` senza header
+     * esplicito. Fidarsi del Content-Type (come prima) appendeva il badge al JSON,
+     * corrompendolo. Il body invece NON mente: se inizia per ``{``/``[`` è JSON,
+     * se per ``<?xml`` è XML → niente badge. Si inietta solo con marcatori HTML
+     * di pagina intera (``<html``/``</body>``/``<!doctype``).
+     */
     private static function looksLikeHtml(string $buffer): bool
     {
-        foreach (headers_list() as $h) {
-            if (stripos($h, 'content-type:') === 0) {
-                return stripos($h, 'text/html') !== false;
-            }
+        $head = ltrim($buffer);
+        if ($head === '') {
+            return false;
         }
-        return stripos($buffer, '</body>') !== false || stripos($buffer, '<html') !== false;
+        $c = $head[0];
+        if ($c === '{' || $c === '[') {
+            return false;                       // JSON
+        }
+        if (stripos($head, '<?xml') === 0) {
+            return false;                       // XML
+        }
+        return stripos($buffer, '</body>') !== false
+            || stripos($buffer, '<html') !== false
+            || stripos($head, '<!doctype') === 0;
     }
 
     // --- bootstrap statico (il codice protetto chiama il metodo statico) -----
