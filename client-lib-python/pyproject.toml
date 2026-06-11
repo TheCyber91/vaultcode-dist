@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vaultcode-client"
-version = "1.0.0"
+version = "1.0.1"
 description = "VaultCode — client runtime per script Python (decifratura a runtime delle porzioni protette)"
 requires-python = ">=3.11"
 dependencies = ["cryptography>=41"]

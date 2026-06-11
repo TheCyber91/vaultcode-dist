@@ -9,15 +9,50 @@ server contraffatto resta la **firma Ed25519** di /status, /revocations, /releas
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import socket
 import time
 import urllib.request
 
 from . import crypto
 from .config import Config
 
-RUNTIME_VERSION = "1.0.0"
+RUNTIME_VERSION = "1.0.1"
+
+
+def _install_context() -> dict:
+    """Contesto d'installazione del bot (anti-copia §4): DOVE gira l'opera. Dati
+    minimi e dichiarati (host/IP/macchina/percorso), mai contenuto o attività del
+    cliente. Best-effort: ogni campo è opzionale e non solleva mai."""
+    ctx: dict[str, str] = {}
+    try:
+        ctx["dominio"] = socket.getfqdn() or socket.gethostname()       # contesto (no HTTP host nei bot)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80)); ctx["host"] = s.getsockname()[0]  # IP locale/uscita (best-effort)
+        finally:
+            s.close()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        mid = ""
+        for p in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+            if os.path.exists(p):
+                mid = open(p, encoding="utf-8").read().strip()
+                break
+        ctx["machine_id"] = hashlib.sha256((mid or socket.gethostname()).encode()).hexdigest()[:24]
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        ctx["install_path"] = os.getcwd()
+    except Exception:  # noqa: BLE001
+        pass
+    return {k: v for k, v in ctx.items() if v}
 
 
 class KeyServerClient:
@@ -63,7 +98,7 @@ class KeyServerClient:
             pass
 
     def fetch_status(self) -> dict | None:
-        body = json.dumps({"client_version": RUNTIME_VERSION}).encode("utf-8")
+        body = json.dumps({"client_version": RUNTIME_VERSION, **_install_context()}).encode("utf-8")
         try:
             _code, raw = self._http("POST", "/status", self._signed_headers("POST", "/status", body), body)
         except Exception:  # noqa: BLE001 - disponibilità: il chiamante tiene l'ultimo stato noto

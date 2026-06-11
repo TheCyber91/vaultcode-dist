@@ -87,10 +87,35 @@ final class KeyServerClient implements KeyServerInterface
         }
     }
 
+    /**
+     * Contesto d'installazione (anti-copia §4): DOVE gira l'opera. Dati minimi e
+     * dichiarati — dominio servito, IP del server, macchina, percorso. Mai contenuto
+     * o attività del cliente. Best-effort: assente o parziale non è mai un errore.
+     */
+    private function installContext(): array
+    {
+        $s = $_SERVER ?? [];
+        $dominio = (string)($s['HTTP_HOST'] ?? $s['SERVER_NAME'] ?? '');
+        $dominio = preg_replace('/:\d+$/', '', $dominio);                  // via la porta
+        $hostip  = (string)($s['SERVER_ADDR'] ?? '');                      // IP del server (spesso IPv4)
+        $path    = (string)($s['DOCUMENT_ROOT'] ?? __DIR__);
+        // machine_id stabile ma NON in chiaro: hash di /etc/machine-id (fallback hostname).
+        $mid = @file_get_contents('/etc/machine-id');
+        if ($mid === false || $mid === '') { $mid = @php_uname('n'); }
+        $machine = $mid ? substr(hash('sha256', (string)$mid), 0, 24) : '';
+        return array_filter([
+            'dominio'      => $dominio,
+            'host'         => $hostip,
+            'machine_id'   => $machine,
+            'install_path' => $path,
+        ], static fn($v) => $v !== '' && $v !== null);
+    }
+
     public function fetchStatus(): ?array
     {
-        // Riporta la versione della libreria → lo studio sa se è aggiornata.
-        $body = json_encode(['client_version' => Runtime::VERSION]);
+        // Riporta la versione della libreria + il contesto d'installazione (dominio/IP
+        // server/macchina) → lo studio mostra "aggiornata?" e DOVE gira l'opera (§4).
+        $body = json_encode(['client_version' => Runtime::VERSION] + $this->installContext());
         try {
             $r = $this->http('POST', '/status', $this->signedHeaders('POST', '/status', $body), $body);
         } catch (\Throwable $e) {

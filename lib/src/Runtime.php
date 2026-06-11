@@ -22,7 +22,7 @@ final class Runtime
 {
     /** Versione della libreria client (riportata al key-server via /status,
      *  usata dallo studio per "aggiornata?" e dall'auto-update). */
-    public const VERSION = '1.0.2';
+    public const VERSION = '1.0.3';
 
     private static ?Runtime $instance = null;
     /** Flag: buffer d'output per l'iniezione automatica del badge già armato. */
